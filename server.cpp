@@ -64,7 +64,7 @@ void handle_client(SocketHandle clientSock, SQL &db, std::mutex &db_mutex)
 
 int main()
 {
-#ifdef _WIN32
+ #ifdef _WIN32
     WSADATA wsaData;
 #endif
     if (WSA_INIT() != 0)
@@ -117,12 +117,24 @@ int main()
             break;
         }
         std::cout << "Client connected" << std::endl;
-        handle_client(clientSock, db, db_mutex);
-        std::cout << "Server is shutting down because the client disconnected." << std::endl;
-        break;
+        // Serve each client in its own detached thread so multiple clients
+        // can connect and issue commands concurrently.
+        try
+        {
+            std::thread clientThread(handle_client, clientSock, std::ref(db), std::ref(db_mutex));
+            clientThread.detach();
+        }
+        catch (const std::system_error &e)
+        {
+            std::cerr << "Failed to create thread for client: " << e.what() << std::endl;
+            CLOSE_SOCKET(clientSock);
+        }
     }
 
     CLOSE_SOCKET(listenSock);
-    WSA_CLEANUP();
+    WSA_CLEANUP(); 
+
+
+
     return 0;
 }
