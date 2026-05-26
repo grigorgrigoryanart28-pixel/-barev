@@ -1,6 +1,5 @@
 #define SQL_SERVER 1
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#include "network_compat.h"
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -8,32 +7,37 @@
 #include <mutex>
 #include <string>
 
-#pragma comment(lib, "Ws2_32.lib")
-
 #include "SQL.cpp"
 
-const char* END_MARKER = "<END_OF_RESPONSE>\n";
+const char *END_MARKER = "<END_OF_RESPONSE>\n";
 
-void handle_client(SOCKET clientSock, SQL& db, std::mutex& db_mutex) {
+void handle_client(SocketHandle clientSock, SQL &db, std::mutex &db_mutex)
+{
     char buffer[1024];
     std::string incoming;
-    while (true) {
+    while (true)
+    {
         int bytes = recv(clientSock, buffer, sizeof(buffer), 0);
-        if (bytes <= 0) break;
+        if (bytes <= 0)
+            break;
         incoming.append(buffer, buffer + bytes);
         // process lines separated by '\n'
         size_t pos;
-        while ((pos = incoming.find('\n')) != std::string::npos) {
+        while ((pos = incoming.find('\n')) != std::string::npos)
+        {
             std::string line = incoming.substr(0, pos);
             incoming.erase(0, pos + 1);
             line = trim(line);
-            if (line.empty()) continue;
+            if (line.empty())
+                continue;
             std::cout << "Received client command: " << line << std::endl;
-            if (line.rfind("CREATE TABLE", 0) == 0 || line.rfind("create table", 0) == 0) {
+            if (line.rfind("CREATE TABLE", 0) == 0 || line.rfind("create table", 0) == 0)
+            {
                 std::cout << "Client has created table." << std::endl;
             }
-            if (line == "EXIT;" || line == "exit;") {
-                closesocket(clientSock);
+            if (line == "EXIT;" || line == "exit;")
+            {
+                CLOSE_SOCKET(clientSock);
                 std::cout << "Client disconnected" << std::endl;
                 return;
             }
@@ -48,26 +52,32 @@ void handle_client(SOCKET clientSock, SQL& db, std::mutex& db_mutex) {
             }
 
             std::string resp = oss.str();
-            if (resp.empty()) resp = "OK\n";
+            if (resp.empty())
+                resp = "OK\n";
             resp += END_MARKER;
             send(clientSock, resp.c_str(), static_cast<int>(resp.size()), 0);
         }
     }
-    closesocket(clientSock);
+    CLOSE_SOCKET(clientSock);
     std::cout << "Client disconnected" << std::endl;
 }
 
-int main() {
+int main()
+{
+#ifdef _WIN32
     WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2,2), &wsaData) != 0) {
+#endif
+    if (WSA_INIT() != 0)
+    {
         std::cerr << "WSAStartup failed" << std::endl;
         return 1;
     }
 
-    SOCKET listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listenSock == INVALID_SOCKET) {
+    SocketHandle listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (IS_INVALID_SOCKET(listenSock))
+    {
         std::cerr << "socket() failed" << std::endl;
-        WSACleanup();
+        WSA_CLEANUP();
         return 1;
     }
 
@@ -76,17 +86,19 @@ int main() {
     service.sin_addr.s_addr = inet_addr("127.0.0.1");
     service.sin_port = htons(54000);
 
-    if (bind(listenSock, (sockaddr*)&service, sizeof(service)) == SOCKET_ERROR) {
+    if (bind(listenSock, (sockaddr *)&service, sizeof(service)) == SOCKET_ERROR_FD)
+    {
         std::cerr << "bind() failed" << std::endl;
-        closesocket(listenSock);
-        WSACleanup();
+        CLOSE_SOCKET(listenSock);
+        WSA_CLEANUP();
         return 1;
     }
 
-    if (listen(listenSock, SOMAXCONN) == SOCKET_ERROR) {
+    if (listen(listenSock, SOMAXCONN) == SOCKET_ERROR_FD)
+    {
         std::cerr << "listen() failed" << std::endl;
-        closesocket(listenSock);
-        WSACleanup();
+        CLOSE_SOCKET(listenSock);
+        WSA_CLEANUP();
         return 1;
     }
 
@@ -96,9 +108,11 @@ int main() {
 
     std::cout << "SQL server listening on 127.0.0.1:54000" << std::endl;
 
-    while (true) {
-        SOCKET clientSock = accept(listenSock, nullptr, nullptr);
-        if (clientSock == INVALID_SOCKET) {
+    while (true)
+    {
+        SocketHandle clientSock = accept(listenSock, nullptr, nullptr);
+        if (IS_INVALID_SOCKET(clientSock))
+        {
             std::cerr << "accept() failed" << std::endl;
             break;
         }
@@ -108,7 +122,7 @@ int main() {
         break;
     }
 
-    closesocket(listenSock);
-    WSACleanup();
+    CLOSE_SOCKET(listenSock);
+    WSA_CLEANUP();
     return 0;
 }
